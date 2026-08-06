@@ -27,6 +27,9 @@
         .axis-label { font-size: 0.8rem; font-weight: bold; color: #333; background: #f9f9f9; padding: 4px 12px; border-bottom: 1px solid #eee; }
         .seisplot-div { height: 250px; width: 100%; }
         .err-box { max-width: 850px; margin: 0 auto; color: red; background: #fff; padding: 15px; border: 2px solid red; font-family: monospace; font-size: 0.8rem; white-space: pre-wrap; }
+        #filter-panel { display: flex; flex-direction: column; gap: 6px; }
+        #filter-inputs { display: flex; flex-direction: column; gap: 8px; }
+        .filter-field label { margin-bottom: 2px; }
         .station-cluster-icon {
             background: rgba(211, 47, 47, 0.9);
             border: 2px solid #fff;
@@ -52,16 +55,27 @@
     <div class="group">
         <label>台網過濾</label>
         <input type="text" id="net-search" class="search-input" placeholder="Net...">
-        <select id="net-select" size="3"></select>
+        <select id="net-select" size="8"></select>
     </div>
     <div class="group">
         <label>測站過濾</label>
         <input type="text" id="sta-search" class="search-input" placeholder="Sta...">
-        <select id="sta-select" size="3"></select>
+        <select id="sta-select" size="8"></select>
     </div>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
         <div class="group"><label>Loc</label><input type="text" id="loc" value="--"></div>
         <div class="group"><label>Cha</label><div id="cha-area"></div></div>
+    </div>
+    <div class="group" id="filter-panel">
+        <label>Filter</label>
+        <select id="filter-type">
+            <option value="none">None</option>
+            <option value="highpass">High-pass</option>
+            <option value="lowpass">Low-pass</option>
+            <option value="bandpass">Band-pass</option>
+        </select>
+        <div id="filter-inputs"></div>
+        <button type="button" id="filter-apply">Apply</button>
     </div>
     <div class="group"><label>開始 (UTC)</label><input type="datetime-local" id="start" step="1"></div>
     <div class="group"><label>結束 (UTC)</label><input type="datetime-local" id="end" step="1"></div>
@@ -140,7 +154,7 @@
     const format = (d) => d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0')+'T'+String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0')+':'+String(d.getUTCSeconds()).padStart(2,'0');
     const now = new Date();
     document.getElementById('end').value = format(new Date(now.getTime() - 5*60000));
-    document.getElementById('start').value = format(new Date(now.getTime() - 35*60000));
+    document.getElementById('start').value = format(new Date(now.getTime() - 15*60000));
 
     // 頻道 UI 初始化與連動
     const updateChaUI = () => {
@@ -157,8 +171,100 @@
                 <option value="SH?">SH?</option>
             </select>`;
     };
-    document.querySelectorAll('input[name="vm"]').forEach(r => r.onchange = updateChaUI);
+    const updateFilterUI = () => {
+        const mode = document.querySelector('input[name="vm"]:checked').value;
+        const panel = document.getElementById('filter-panel');
+        const type = document.getElementById('filter-type').value;
+        const inputs = document.getElementById('filter-inputs');
+
+        if (mode !== 'mseed') {
+            panel.style.display = 'none';
+            return;
+        }
+
+        panel.style.display = 'flex';
+        if (type === 'highpass' || type === 'lowpass') {
+            inputs.innerHTML = `
+                <div class="filter-field">
+                    <label>Cutoff</label>
+                    <input type="number" id="filter-cutoff" value="0.5" step="0.1" min="0">
+                </div>`;
+        } else if (type === 'bandpass') {
+            inputs.innerHTML = `
+                <div class="filter-field">
+                    <label>Low</label>
+                    <input type="number" id="filter-low" value="0.5" step="0.1" min="0">
+                </div>
+                <div class="filter-field">
+                    <label>High</label>
+                    <input type="number" id="filter-high" value="10" step="0.1" min="0">
+                </div>`;
+        } else {
+            inputs.innerHTML = '';
+        }
+    };
+    document.querySelectorAll('input[name="vm"]').forEach(r => r.onchange = () => {
+        updateChaUI();
+        updateFilterUI();
+    });
+    document.getElementById('filter-type').onchange = updateFilterUI;
     updateChaUI();
+    updateFilterUI();
+
+    const getFilterSpec = () => {
+        const filterType = document.getElementById('filter-type').value;
+        if (filterType === 'none') {
+            return null;
+        }
+
+        if (filterType === 'highpass' || filterType === 'lowpass') {
+            const cutoff = Number.parseFloat(document.getElementById('filter-cutoff').value);
+            if (!Number.isFinite(cutoff) || cutoff <= 0) {
+                throw new Error('Cutoff 必須是大於 0 的數字。');
+            }
+            return { type: filterType, cutoff };
+        }
+
+        if (filterType === 'bandpass') {
+            const low = Number.parseFloat(document.getElementById('filter-low').value);
+            const high = Number.parseFloat(document.getElementById('filter-high').value);
+            if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high <= 0) {
+                throw new Error('Low / High 必須是大於 0 的數字。');
+            }
+            if (low >= high) {
+                throw new Error('Band-pass 需要 Low 小於 High。');
+            }
+            return { type: filterType, low, high };
+        }
+
+        throw new Error(`未知的濾波模式：${filterType}`);
+    };
+
+    const applySelectedFilter = (seis) => {
+        const spec = getFilterSpec();
+        if (!spec) {
+            return seis;
+        }
+
+        const delta = seis.samplePeriod;
+        if (spec.type === 'highpass') {
+            const iirFilter = sp.filter.createButterworth(4, sp.filter.HIGH_PASS, spec.cutoff, spec.cutoff, delta);
+            return sp.filter.applyFilter(iirFilter, seis);
+        }
+
+        if (spec.type === 'lowpass') {
+            const iirFilter = sp.filter.createButterworth(4, sp.filter.LOW_PASS, 0, spec.cutoff, delta);
+            return sp.filter.applyFilter(iirFilter, seis);
+        }
+
+        if (spec.type === 'bandpass') {
+            const highPass = sp.filter.createButterworth(4, sp.filter.HIGH_PASS, spec.low, spec.low, delta);
+            const lowPass = sp.filter.createButterworth(4, sp.filter.LOW_PASS, 0, spec.high, delta);
+            return sp.filter.applyFilter(lowPass, sp.filter.applyFilter(highPass, seis));
+        }
+
+        return seis;
+    };
 
     const expandChaList = (cha) => {
         if (!cha || cha === 'All') {
@@ -256,7 +362,14 @@
                 if (!sdds || sdds.length === 0) throw new Error("解析結果為空 (0 SDD)。");
 
                 area.innerHTML = '';
-                sdds.forEach(sdd => {
+                const filteredSdds = sdds.map(sdd => {
+                    if (!sdd.seismogram) {
+                        return sdd;
+                    }
+                    return sdd.cloneWithNewSeismogram(applySelectedFilter(sdd.seismogram));
+                });
+
+                filteredSdds.forEach(sdd => {
                     const con = document.createElement('div');
                     con.className = 'axis-container';
                     con.innerHTML = `<div class="axis-label">${sdd.codes()}</div><div class="seisplot-div"></div>`;
@@ -275,6 +388,7 @@
     }
 
     document.getElementById('query-btn').onclick = doQuery;
+    document.getElementById('filter-apply').onclick = doQuery;
     loadStations();
 </script>
 </body>
