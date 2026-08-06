@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IRIS Waveform Viewer</title>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            background-color: #f4f4f9;
+        }
+
+        /* 左側選單 */
+        #sidebar {
+            width: 320px;
+            background: #fff;
+            padding: 20px;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            z-index: 1000;
+        }
+
+        h2 { margin: 0 0 10px 0; font-size: 1.2rem; color: #333; }
+
+        .input-group { display: flex; flex-direction: column; gap: 5px; }
+        label { font-size: 0.85rem; color: #666; font-weight: bold; }
+        input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 1rem;
+        }
+
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin-top: 10px;
+        }
+
+        button:hover { background: #0056b3; }
+
+        /* 右側內容 */
+        #main-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        #map { height: 40%; width: 100%; border-bottom: 2px solid #ddd; }
+
+        #waveform-container {
+            height: 60%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #fafafa;
+            overflow: auto;
+            padding: 20px;
+        }
+
+        #waveform-img {
+            max-width: 100%;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            background: white;
+            display: none; /* 初始隱藏 */
+        }
+
+        .status-msg { color: #666; font-style: italic; }
+    </style>
+</head>
+<body>
+
+<aside id="sidebar">
+    <h2>查詢參數</h2>
+    
+    <div class="input-group">
+        <label>Network (net)</label>
+        <input type="text" id="net" placeholder="e.g., TW" value="TW">
+    </div>
+    
+    <div class="input-group">
+        <label>Station (sta)</label>
+        <input type="text" id="sta" placeholder="e.g., TPUB" value="TPUB">
+    </div>
+
+    <div class="input-group">
+        <label>Location (loc)</label>
+        <input type="text" id="loc" value="--">
+    </div>
+
+    <div class="input-group">
+        <label>Channel (cha)</label>
+        <input type="text" id="cha" value="BHZ">
+    </div>
+
+    <div class="input-group">
+        <label>Start Time (UTC)</label>
+        <input type="datetime-local" id="start">
+    </div>
+
+    <div class="input-group">
+        <label>End Time (UTC)</label>
+        <input type="datetime-local" id="end">
+    </div>
+
+    <button onclick="queryWaveform()">送出查詢 (Query)</button>
+    <div id="info" style="font-size: 0.8rem; color: #888; margin-top: 10px;"></div>
+</aside>
+
+<main id="main-content">
+    <div id="map"></div>
+    <div id="waveform-container">
+        <p id="placeholder" class="status-msg">請選擇台站並點擊 Query 顯示波形</p>
+        <img id="waveform-img" src="" alt="Waveform Plot">
+    </div>
+</main>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+    // --- 1. 初始化地圖 ---
+    const map = L.map('map').setView([23.5, 121], 7);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    // --- 2. 設定預設時間 (最近1小時) ---
+    function setDefaultTime() {
+        const now = new Date();
+        const oneHourAgo = new Date(now.getTime() - (60 * 60 * 1000));
+        
+        document.getElementById('start').value = oneHourAgo.toISOString().slice(0, 16);
+        document.getElementById('end').value = now.toISOString().slice(0, 16);
+    }
+    setDefaultTime();
+
+    // --- 3. 讀取台站列表 ---
+    const STATIONS_URL = 'https://www.iris.edu/app/station_monitor/offline/stations.txt';
+
+    async function loadStations() {
+        try {
+            const response = await fetch(STATIONS_URL);
+            const data = await response.text();
+            const lines = data.split('\n');
+
+            // 跳過標題列
+            for (let i = 1; i < lines.length; i++) {
+                const cols = lines[i].split('|');
+                if (cols.length < 4) continue;
+
+                const [net, sta, lat, lon, elev, site] = cols;
+
+                // 在地圖建立 Marker
+                const marker = L.marker([parseFloat(lat), parseFloat(lon)])
+                    .addTo(map)
+                    .bindPopup(`<b>${net}.${sta}</b><br>${site}`);
+
+                // 點擊 Marker 自動填入表單
+                marker.on('click', () => {
+                    document.getElementById('net').value = net;
+                    document.getElementById('sta').value = sta;
+                });
+            }
+        } catch (error) {
+            console.error('無法載入台站列表:', error);
+            document.getElementById('info').innerText = '無法從 IRIS 載入台站列表。';
+        }
+    }
+    loadStations();
+
+    // --- 4. 查詢波形圖片 ---
+    function queryWaveform() {
+        const net = document.getElementById('net').value.trim();
+        const sta = document.getElementById('sta').value.trim();
+        const loc = document.getElementById('loc').value.trim();
+        const cha = document.getElementById('cha').value.trim();
+        
+        // 格式化時間：IRIS API 接受 ISO 格式或 YYYY-MM-DDTHH:MM:SS
+        const start = document.getElementById('start').value;
+        const end = document.getElementById('end').value;
+
+        if (!net || !sta) {
+            alert('請輸入 Network 與 Station');
+            return;
+        }
+
+        const placeholder = document.getElementById('placeholder');
+        const img = document.getElementById('waveform-img');
+
+        placeholder.innerText = '載入中...';
+        img.style.display = 'none';
+
+        // 組合 URL
+        const baseUrl = 'https://service.iris.edu/irisws/timeseries/1/query';
+        const params = new URLSearchParams({
+            net: net,
+            sta: sta,
+            loc: loc,
+            cha: cha,
+            start: start,
+            end: end,
+            output: 'plot'
+        });
+
+        const finalUrl = `${baseUrl}?${params.toString()}`;
+
+        // 更新圖片
+        img.src = finalUrl;
+
+        img.onload = function() {
+            placeholder.style.display = 'none';
+            img.style.display = 'block';
+        };
+
+        img.onerror = function() {
+            placeholder.style.display = 'block';
+            placeholder.innerText = '查詢失敗，請檢查台站代碼或該時段是否有資料。';
+            img.style.display = 'none';
+        };
+
+        // 顯示目前查詢網址方便除錯
+        document.getElementById('info').innerHTML = `Source: <a href="${finalUrl}" target="_blank">IRIS Link</a>`;
+    }
+</script>
+
+</body>
+</html>
