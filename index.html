@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IRIS Waveform Viewer (UTC)</title>
+    <title>IRIS Viewer (Local Station Mode)</title>
     
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -11,210 +11,202 @@
     <style>
         * { box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-family: -apple-system, system-ui, sans-serif;
             margin: 0;
             display: flex;
             height: 100vh;
-            background-color: #f4f4f9;
+            background: #f0f0f0;
         }
 
-        /* 左側選單 */
+        /* 左側控制面板 */
         #sidebar {
             width: 320px;
             background: #fff;
-            padding: 20px;
+            padding: 15px;
             box-shadow: 2px 0 5px rgba(0,0,0,0.1);
             display: flex;
             flex-direction: column;
-            gap: 15px;
+            gap: 12px;
             z-index: 1000;
         }
 
-        h2 { margin: 0; font-size: 1.2rem; color: #d32f2f; border-bottom: 2px solid #d32f2f; padding-bottom: 5px; }
+        h2 { margin: 0; font-size: 1.1rem; color: #d32f2f; border-left: 4px solid #d32f2f; padding-left: 8px; }
 
-        .input-group { display: flex; flex-direction: column; gap: 5px; }
-        label { font-size: 0.85rem; color: #666; font-weight: bold; }
-        .utc-label { color: #d32f2f; font-size: 0.75rem; margin-left: 5px; }
+        .group { display: flex; flex-direction: column; gap: 4px; }
+        label { font-size: 0.8rem; font-weight: bold; color: #555; }
+        .utc-tag { color: #d32f2f; font-size: 0.7rem; }
         
         input {
             padding: 8px;
-            border: 1px solid #ddd;
+            border: 1px solid #ccc;
             border-radius: 4px;
-            font-size: 0.95rem;
+            font-family: monospace;
         }
 
         button {
             background: #d32f2f;
-            color: white;
+            color: #fff;
             border: none;
             padding: 12px;
             border-radius: 4px;
             cursor: pointer;
-            font-size: 1rem;
             font-weight: bold;
-            margin-top: 10px;
+            font-size: 1rem;
         }
         button:hover { background: #b71c1c; }
 
-        /* 右側內容 */
-        #main-content {
+        /* 右側顯示區 */
+        #main {
             flex-grow: 1;
             display: flex;
             flex-direction: column;
         }
 
-        #map { height: 40%; width: 100%; border-bottom: 1px solid #ccc; }
+        #map { height: 40%; width: 100%; background: #ddd; }
 
-        #waveform-container {
-            height: 60%;
+        #viewer {
+            flex-grow: 1;
             display: flex;
             justify-content: center;
             align-items: center;
             background: #fff;
-            overflow: auto;
             padding: 10px;
+            overflow: auto;
         }
 
-        #waveform-img {
-            max-width: 100%;
-            max-height: 95%;
-            display: none;
-        }
-
-        .status-msg { color: #888; font-style: italic; }
-        #info { font-size: 0.8rem; color: #666; margin-top: auto; }
+        #waveform-img { max-width: 100%; max-height: 100%; display: none; }
+        .msg { color: #999; font-size: 0.9rem; }
+        #status { font-size: 0.75rem; color: #777; margin-top: auto; }
     </style>
 </head>
 <body>
 
 <aside id="sidebar">
-    <h2>IRIS 查詢 (UTC)</h2>
+    <h2>IRIS Waveform Viewer</h2>
     
-    <div class="input-group">
+    <div class="group">
         <label>Network</label>
         <input type="text" id="net" value="TW">
     </div>
-    
-    <div class="input-group">
+    <div class="group">
         <label>Station</label>
         <input type="text" id="sta" value="TPUB">
     </div>
-
-    <div class="input-group">
+    <div class="group">
         <label>Location</label>
         <input type="text" id="loc" value="--">
     </div>
-
-    <div class="input-group">
+    <div class="group">
         <label>Channel</label>
         <input type="text" id="cha" value="BHZ">
     </div>
-
-    <div class="input-group">
-        <label>Start Time <span class="utc-label">(UTC)</span></label>
+    <div class="group">
+        <label>Start Time <span class="utc-tag">(UTC)</span></label>
         <input type="datetime-local" id="start" step="1">
     </div>
-
-    <div class="input-group">
-        <label>End Time <span class="utc-label">(UTC)</span></label>
+    <div class="group">
+        <label>End Time <span class="utc-tag">(UTC)</span></label>
         <input type="datetime-local" id="end" step="1">
     </div>
 
-    <button onclick="queryWaveform()">送出查詢</button>
+    <button onclick="doQuery()">送出查詢</button>
     
-    <div id="info">
-        狀態：<span id="status-text">初始化中...</span>
-    </div>
+    <div id="status">準備就緒</div>
 </aside>
 
-<main id="main-content">
+<main id="main">
     <div id="map"></div>
-    <div id="waveform-container">
-        <p id="placeholder" class="status-msg">請由地圖選擇台站，或直接輸入後按送出</p>
-        <img id="waveform-img" src="" alt="Waveform Plot">
+    <div id="viewer">
+        <p id="hint" class="msg">點擊地圖台站或輸入參數後查詢</p>
+        <img id="waveform-img" src="" alt="Waveform">
     </div>
 </main>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
+    // 1. 初始化地圖
     const map = L.map('map').setView([23.5, 121], 7);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap'
+        attribution: '© OSM'
     }).addTo(map);
 
-    // --- 時間處理：全部強制使用 UTC ---
-    function initUTCTimes() {
+    // 2. 初始化 UTC 時間 (預設最近1小時)
+    function setInitialTime() {
         const now = new Date();
-        const oneHourAgo = new Date(now.getTime() - (60 * 60 * 1000));
-        
-        // toISOString() 輸出的就是 UTC 格式: YYYY-MM-DDTHH:mm:ss.sssZ
-        // datetime-local 需要格式為 YYYY-MM-DDTHH:mm:ss
-        const formatUTC = (date) => date.toISOString().split('.')[0].slice(0, 19);
-
-        document.getElementById('start').value = formatUTC(oneHourAgo);
-        document.getElementById('end').value = formatUTC(now);
+        const past = new Date(now.getTime() - 3600000);
+        // datetime-local 需要 YYYY-MM-DDTHH:mm:ss
+        const toUTCStr = (d) => d.toISOString().split('.')[0];
+        document.getElementById('start').value = toUTCStr(past);
+        document.getElementById('end').value = toUTCStr(now);
     }
-    initUTCTimes();
+    setInitialTime();
 
-    // --- 載入台站 (CORS Proxy) ---
-    async function loadStations() {
-        const statusText = document.getElementById('status-text');
-        const targetUrl = 'https://www.iris.edu/app/station_monitor/offline/stations.txt';
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
-
+    // 3. 讀取本機 stations.txt (必須與 index.html 同層)
+    async function loadLocalStations() {
+        const stat = document.getElementById('status');
         try {
-            statusText.innerText = '載入台站中...';
-            const response = await fetch(proxyUrl);
-            const data = await response.text();
-            const lines = data.split('\n');
+            stat.innerText = '讀取 stations.txt...';
+            // 直接抓取同專案目錄下的檔案
+            const resp = await fetch('./stations.txt');
+            if (!resp.ok) throw new Error('找不到 stations.txt');
+            
+            const text = await resp.text();
+            const lines = text.split('\n');
 
+            let count = 0;
             for (let i = 1; i < lines.length; i++) {
-                const cols = lines[i].split('|');
-                if (cols.length < 4) continue;
-                const [net, sta, lat, lon] = cols;
-
+                const parts = lines[i].split('|');
+                if (parts.length < 4) continue;
+                
+                const [net, sta, lat, lon] = parts;
+                
                 L.marker([parseFloat(lat), parseFloat(lon)])
                     .addTo(map)
                     .on('click', () => {
                         document.getElementById('net').value = net;
                         document.getElementById('sta').value = sta;
                     });
+                count++;
             }
-            statusText.innerText = '台站載入完成 (UTC)';
-        } catch (e) {
-            statusText.innerText = '台站列表載入失敗';
+            stat.innerText = `成功載入 ${count} 個台站`;
+        } catch (err) {
+            stat.innerText = '錯誤: ' + err.message;
+            console.error(err);
         }
     }
-    loadStations();
+    loadLocalStations();
 
-    // --- 執行查詢 ---
-    function queryWaveform() {
+    // 4. 查詢波形
+    function doQuery() {
         const net = document.getElementById('net').value.trim();
         const sta = document.getElementById('sta').value.trim();
         const loc = document.getElementById('loc').value.trim();
         const cha = document.getElementById('cha').value.trim();
-        const start = document.getElementById('start').value; // 這裡抓到的是使用者視為 UTC 的字串
+        const start = document.getElementById('start').value;
         const end = document.getElementById('end').value;
 
-        const placeholder = document.getElementById('placeholder');
         const img = document.getElementById('waveform-img');
+        const hint = document.getElementById('hint');
 
-        placeholder.innerText = '請求中 (UTC 查詢)...';
+        hint.innerText = '正在從 IRIS 取得波形圖...';
         img.style.display = 'none';
 
-        // IRIS Timeseries API 組合
-        // 注意：API 本身就預設接收 UTC 字串
-        const url = `https://service.iris.edu/irisws/timeseries/1/query?net=${net}&sta=${sta}&loc=${loc}&cha=${cha}&start=${start}&end=${end}&output=plot`;
+        // 組合網址
+        const q = new URLSearchParams({
+            net, sta, loc, cha, start, end,
+            output: 'plot'
+        });
+        const finalUrl = `https://service.iris.edu/irisws/timeseries/1/query?${q.toString()}`;
 
-        img.src = url;
+        img.src = finalUrl;
         img.onload = () => {
-            placeholder.style.display = 'none';
+            hint.style.display = 'none';
             img.style.display = 'block';
         };
         img.onerror = () => {
-            placeholder.style.display = 'block';
-            placeholder.innerText = '無資料或參數錯誤 (請確認 UTC 時間)';
+            hint.style.display = 'block';
+            hint.innerText = '查詢失敗：無資料或參數錯誤。';
         };
     }
 </script>
