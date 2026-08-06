@@ -2,183 +2,220 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IRIS Waveform Viewer (Select Mode)</title>
+    <title>IRIS 3-Axis Pro Viewer</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         * { box-sizing: border-box; }
-        body { font-family: sans-serif; margin: 0; display: flex; height: 100vh; background: #f4f4f4; }
-        #sidebar { width: 320px; background: #fff; padding: 20px; box-shadow: 2px 0 5px rgba(0,0,0,0.1); display: flex; flex-direction: column; gap: 12px; z-index: 1000; }
-        h2 { margin: 0; font-size: 1.2rem; color: #d32f2f; border-bottom: 2px solid #d32f2f; padding-bottom: 5px; }
-        .group { display: flex; flex-direction: column; gap: 4px; }
-        label { font-size: 0.8rem; font-weight: bold; color: #666; }
+        body { font-family: sans-serif; margin: 0; display: flex; height: 100vh; background: #eee; overflow: hidden; }
+        #sidebar { width: 320px; background: #fff; padding: 15px; box-shadow: 2px 0 5px rgba(0,0,0,0.1); display: flex; flex-direction: column; gap: 8px; z-index: 1000; overflow-y: auto; }
+        h2 { margin: 0; font-size: 1.1rem; color: #d32f2f; border-bottom: 2px solid #d32f2f; padding-bottom: 5px; }
+        .group { display: flex; flex-direction: column; gap: 2px; }
+        label { font-size: 0.75rem; font-weight: bold; color: #666; }
         .utc-text { color: #d32f2f; font-weight: bold; }
-        select, input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.95rem; background: white; }
-        button { background: #d32f2f; color: #fff; border: none; padding: 12px; border-radius: 4px; cursor: pointer; font-weight: bold; margin-top: 5px; }
-        button:hover { background: #b71c1c; }
-        #main { flex-grow: 1; display: flex; flex-direction: column; }
-        #map { height: 40%; width: 100%; border-bottom: 1px solid #ccc; }
-        #viewer { flex-grow: 1; display: flex; justify-content: center; align-items: center; background: #fff; padding: 10px; overflow: auto; }
-        #waveform-img { max-width: 100%; max-height: 100%; display: none; border: 1px solid #ddd; }
-        .msg { color: #888; font-style: italic; font-size: 0.9rem; text-align: center; }
-        #status { font-size: 0.75rem; color: #777; margin-top: auto; padding-top: 10px; border-top: 1px solid #eee; }
+        .search-input { padding: 6px; border: 1px solid #eee; border-radius: 4px 4px 0 0; font-size: 0.8rem; background: #fafafa; }
+        select, input { padding: 8px; border: 1px solid #ccc; border-radius: 0 0 4px 4px; font-size: 0.95rem; background: white; outline: none; }
+        .mode-switch { display: flex; background: #eee; border-radius: 4px; padding: 2px; margin: 5px 0; }
+        .mode-switch label { flex: 1; text-align: center; padding: 6px; cursor: pointer; font-size: 0.8rem; }
+        .mode-switch input { display: none; }
+        .mode-switch input:checked + span { background: #d32f2f; color: white; border-radius: 4px; }
+        .mode-switch span { display: block; padding: 4px; }
+        button { background: #d32f2f; color: #fff; border: none; padding: 12px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 1rem; }
+        #main { flex-grow: 1; display: flex; flex-direction: column; height: 100vh; }
+        #map { height: 35%; width: 100%; border-bottom: 1px solid #ccc; }
+        #viewer { flex-grow: 1; background: #f4f4f4; padding: 20px; overflow-y: auto; }
+        .axis-container { max-width: 850px; margin: 0 auto 15px auto; background: #fff; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .axis-label { font-size: 0.8rem; font-weight: bold; color: #333; background: #f9f9f9; padding: 4px 12px; border-bottom: 1px solid #eee; }
+        .seisplot-div { height: 250px; width: 100%; }
+        .err-box { max-width: 850px; margin: 0 auto; color: red; background: #fff; padding: 15px; border: 2px solid red; font-family: monospace; font-size: 0.8rem; white-space: pre-wrap; }
+        .station-cluster-icon {
+            background: rgba(211, 47, 47, 0.9);
+            border: 2px solid #fff;
+            border-radius: 50%;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 700;
+        }
     </style>
 </head>
 <body>
 
 <aside id="sidebar">
-    <h2>IRIS Viewer (UTC)</h2>
-    
-    <div class="group">
-        <label>1. 選擇台網 (Network)</label>
-        <select id="net-select">
-            <option value="">載入中...</option>
-        </select>
+    <h2>IRIS Viewer Pro</h2>
+    <div class="mode-switch">
+        <label><input type="radio" name="vm" value="plot" checked> <span>圖片 (PNG)</span></label>
+        <label><input type="radio" name="vm" value="mseed"> <span>解析 (mseed)</span></label>
     </div>
-
     <div class="group">
-        <label>2. 選擇測站 (Station)</label>
-        <select id="sta-select">
-            <option value="">請先選擇台網</option>
-        </select>
+        <label>台網過濾</label>
+        <input type="text" id="net-search" class="search-input" placeholder="Net...">
+        <select id="net-select" size="3"></select>
     </div>
-
     <div class="group">
-        <label>位置 (Location)</label>
-        <input type="text" id="loc" value="--">
+        <label>測站過濾</label>
+        <input type="text" id="sta-search" class="search-input" placeholder="Sta...">
+        <select id="sta-select" size="3"></select>
     </div>
-
-    <div class="group">
-        <label>頻道 (Channel)</label>
-        <input type="text" id="cha" value="BHZ">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <div class="group"><label>Loc</label><input type="text" id="loc" value="--"></div>
+        <div class="group"><label>Cha</label><div id="cha-area"></div></div>
     </div>
-
-    <div class="group">
-        <label>開始時間 <span class="utc-text">UTC</span></label>
-        <input type="datetime-local" id="start" step="1">
-    </div>
-
-    <div class="group">
-        <label>結束時間 <span class="utc-text">UTC</span></label>
-        <input type="datetime-local" id="end" step="1">
-    </div>
-
-    <button onclick="doQuery()">送出查詢 (Query)</button>
-    
-    <div id="status">正在初始化...</div>
+    <div class="group"><label>開始 (UTC)</label><input type="datetime-local" id="start" step="1"></div>
+    <div class="group"><label>結束 (UTC)</label><input type="datetime-local" id="end" step="1"></div>
+    <button id="query-btn">執行查詢</button>
 </aside>
 
 <main id="main">
     <div id="map"></div>
-    <div id="viewer">
-        <p id="hint" class="msg">請從選單選擇或點擊地圖測站</p>
-        <img id="waveform-img" src="" alt="Waveform Plot">
-    </div>
+    <div id="viewer"><div id="display-area"></div></div>
 </main>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-<script>
+<script type="module">
+    import * as sp from './seisplotjs_3.2.6_standalone.mjs';
+
     const map = L.map('map').setView([23.5, 121], 7);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM' }).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    const stationLayer = L.layerGroup().addTo(map);
 
-    // 存儲所有解析後的測站資料
-    // 結構: { "TW": ["TPUB", "YULB", ...], "1E": ["MONT1", ... ] }
     let stationMaster = {};
+    let stationRecords = [];
+    let sortedNets = [];
+    let refreshStationTimer = null;
 
-    // --- 初始化 UTC 時間 ---
-    function setUTCInputs() {
-        const now = new Date();
-        const past = new Date(now.getTime() - (60 * 60 * 1000));
-        const formatAsUTC = (d) => {
-            const pad = (n) => String(n).padStart(2, '0');
-            return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
-        };
-        document.getElementById('start').value = formatAsUTC(past);
-        document.getElementById('end').value = formatAsUTC(now);
-    }
-    setUTCInputs();
-
-    // --- 載入本機 stations.txt ---
-    async function loadStations() {
-        const statusEl = document.getElementById('status');
-        const netSelect = document.getElementById('net-select');
-
-        try {
-            const resp = await fetch('./stations.txt');
-            if (!resp.ok) throw new Error('找不到 stations.txt');
-            const text = await resp.text();
-            const lines = text.split('\n');
-
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i].trim();
-                if (!line || line.startsWith('#')) continue; // 跳過註解和空行
-
-                const cols = line.split('|');
-                if (cols.length < 4) continue;
-                const [net, sta, lat, lon] = cols;
-
-                // 存入分類結構
-                if (!stationMaster[net]) stationMaster[net] = [];
-                if (!stationMaster[net].includes(sta)) {
-                    stationMaster[net].push(sta);
-                }
-
-                // 地圖 Marker
-                L.marker([parseFloat(lat), parseFloat(lon)])
-                    .addTo(map)
-                    .bindPopup(`<b>${net}.${sta}</b>`)
-                    .on('click', () => {
-                        syncSelects(net, sta);
-                    });
-            }
-
-            // 填充 Network 下拉選單
-            netSelect.innerHTML = '<option value="">-- 請選擇 --</option>';
-            Object.keys(stationMaster).sort().forEach(net => {
-                const opt = document.createElement('option');
-                opt.value = net;
-                opt.textContent = net;
-                netSelect.appendChild(opt);
-            });
-
-            statusEl.innerText = '台站列表載入成功';
-        } catch (e) {
-            statusEl.innerText = '錯誤: ' + e.message;
-        }
-    }
-
-    // --- 當 Network 改變時，更新 Station 選單 ---
-    document.getElementById('net-select').addEventListener('change', function() {
-        const net = this.value;
-        const staSelect = document.getElementById('sta-select');
-        staSelect.innerHTML = '<option value="">-- 請選擇 --</option>';
-
-        if (net && stationMaster[net]) {
-            stationMaster[net].sort().forEach(sta => {
-                const opt = document.createElement('option');
-                opt.value = sta;
-                opt.textContent = sta;
-                staSelect.appendChild(opt);
-            });
-        }
+    const makeStationIcon = (count) => L.divIcon({
+        className: 'station-cluster-icon',
+        html: `<span>${count}</span>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
     });
 
-    // --- 地圖點擊後同步兩個下拉選單 ---
-    function syncSelects(net, sta) {
-        const netSelect = document.getElementById('net-select');
-        const staSelect = document.getElementById('sta-select');
+    const refreshStationLayer = () => {
+        stationLayer.clearLayers();
+        const bounds = map.getBounds().pad(0.2);
+        const zoom = map.getZoom();
+        const cellSize = zoom <= 4 ? 120 : zoom <= 6 ? 80 : zoom <= 8 ? 50 : 30;
+        const buckets = new Map();
 
-        netSelect.value = net;
-        // 手動觸發 change 事件來刷新測站選單
-        netSelect.dispatchEvent(new Event('change'));
-        staSelect.value = sta;
+        stationRecords.forEach(record => {
+            if (!bounds.contains([record.lat, record.lon])) return;
+            const point = map.project([record.lat, record.lon], zoom);
+            const key = `${Math.floor(point.x / cellSize)}:${Math.floor(point.y / cellSize)}`;
+            const bucket = buckets.get(key);
+            if (bucket) {
+                bucket.push(record);
+            } else {
+                buckets.set(key, [record]);
+            }
+        });
+
+        buckets.forEach(group => {
+            if (group.length === 1) {
+                const record = group[0];
+                stationLayer.addLayer(L.marker([record.lat, record.lon]).on('click', () => syncSelects(record.net, record.sta)));
+                return;
+            }
+
+            const avgLat = group.reduce((sum, record) => sum + record.lat, 0) / group.length;
+            const avgLon = group.reduce((sum, record) => sum + record.lon, 0) / group.length;
+            const cluster = L.marker([avgLat, avgLon], { icon: makeStationIcon(group.length) });
+            cluster.bindTooltip(`${group.length} stations`, { direction: 'top', opacity: 0.9 });
+            cluster.on('click', () => {
+                map.fitBounds(L.latLngBounds(group.map(record => [record.lat, record.lon])).pad(0.2));
+            });
+            stationLayer.addLayer(cluster);
+        });
+    };
+
+    map.on('moveend zoomend', () => {
+        clearTimeout(refreshStationTimer);
+        refreshStationTimer = setTimeout(refreshStationLayer, 80);
+    });
+
+    // 初始化時間
+    const format = (d) => d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0')+'T'+String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0')+':'+String(d.getUTCSeconds()).padStart(2,'0');
+    const now = new Date();
+    document.getElementById('end').value = format(new Date(now.getTime() - 5*60000));
+    document.getElementById('start').value = format(new Date(now.getTime() - 35*60000));
+
+    // 頻道 UI 初始化與連動
+    const updateChaUI = () => {
+        const mode = document.querySelector('input[name="vm"]:checked').value;
+        const area = document.getElementById('cha-area');
+        const defaultValue = 'All';
+        area.innerHTML = `
+            <select id="cha" style="width:100%; padding:8px; border:1px solid #ccc;">
+                <option value="All" ${defaultValue === 'All' ? 'selected' : ''}>All</option>
+                <option value="BH?">BH?</option>
+                <option value="HH?">HH?</option>
+                <option value="EH?">EH?</option>
+                <option value="HN?">HN?</option>
+                <option value="SH?">SH?</option>
+            </select>`;
+    };
+    document.querySelectorAll('input[name="vm"]').forEach(r => r.onchange = updateChaUI);
+    updateChaUI();
+
+    const expandChaList = (cha) => {
+        if (!cha || cha === 'All') {
+            return ['BHZ', 'BHN', 'BHE'];
+        }
+        if (cha.endsWith('?')) {
+            return ['Z', 'N', 'E'].map(x => cha.replace('?', x));
+        }
+        return [cha];
+    };
+
+    // 載入台站
+    async function loadStations() {
+        const resp = await fetch('./stations.txt');
+        const text = await resp.text();
+        text.split('\n').forEach(line => {
+            if (!line.trim() || line.startsWith('#')) return;
+            const [net, sta, lat, lon] = line.split('|');
+            if (!stationMaster[net]) stationMaster[net] = [];
+            if (!stationMaster[net].includes(sta)) stationMaster[net].push(sta);
+            stationRecords.push({ net, sta, lat: parseFloat(lat), lon: parseFloat(lon) });
+        });
+        const prioNets = ['TW', 'JP', 'IU'];
+        const allNets = Object.keys(stationMaster);
+        sortedNets = prioNets.filter(n => allNets.includes(n)).concat(allNets.filter(n => !prioNets.includes(n)).sort());
+        renderNetOptions(sortedNets);
+        refreshStationLayer();
     }
 
-    loadStations();
+    const renderNetOptions = (list) => { document.getElementById('net-select').innerHTML = list.map(n => `<option value="${n}">${n}</option>`).join(''); };
+    const renderStaOptions = (list, net) => {
+        let final = [...list].sort();
+        if (net === 'IU') {
+            const prio = ['TATO', 'MAJO'];
+            final = prio.filter(s => final.includes(s)).concat(final.filter(s => !prio.includes(s)));
+        }
+        document.getElementById('sta-select').innerHTML = final.map(s => `<option value="${s}">${s}</option>`).join('');
+    };
 
-    // --- 執行查詢 ---
-    function doQuery() {
+    document.getElementById('net-search').oninput = (e) => renderNetOptions(sortedNets.filter(n => n.includes(e.target.value.toUpperCase())));
+    document.getElementById('sta-search').oninput = (e) => {
+        const net = document.getElementById('net-select').value;
+        if (net) renderStaOptions(stationMaster[net].filter(s => s.includes(e.target.value.toUpperCase())), net);
+    };
+    document.getElementById('net-select').onchange = function() {
+        document.getElementById('loc').value = (this.value === 'IU') ? '00' : '--';
+        renderStaOptions(stationMaster[this.value] || [], this.value);
+    };
+    const syncSelects = (net, sta) => {
+        document.getElementById('net-select').value = net;
+        document.getElementById('net-select').dispatchEvent(new Event('change'));
+        document.getElementById('sta-select').value = sta;
+    };
+
+    // --- 核心查詢 ---
+    async function doQuery() {
+        const mode = document.querySelector('input[name="vm"]:checked').value;
         const net = document.getElementById('net-select').value;
         const sta = document.getElementById('sta-select').value;
         const loc = document.getElementById('loc').value.trim();
@@ -186,30 +223,59 @@
         const start = document.getElementById('start').value;
         const end = document.getElementById('end').value;
 
-        if (!net || !sta) {
-            alert('請選擇台網與測站');
-            return;
+        const area = document.getElementById('display-area');
+        area.innerHTML = '<p style="text-align:center;">請求中...</p>';
+
+        if (mode === 'plot') {
+            area.innerHTML = '';
+            const chs = expandChaList(cha);
+            chs.forEach(c => {
+                const url = `https://service.iris.edu/irisws/timeseries/1/query?net=${net}&sta=${sta}&loc=${loc}&cha=${c}&start=${start}&end=${end}&output=plot`;
+                const con = document.createElement('div');
+                con.className = 'axis-container';
+                con.innerHTML = `<div class="axis-label">${net}.${sta}.${loc}.${c}</div><img src="${url}" style="width:100%" onerror="this.parentElement.style.display='none'">`;
+                area.appendChild(con);
+            });
+        } else {
+            try {
+                const chaList = expandChaList(cha);
+                const results = await Promise.all(chaList.map(async (channelCode) => {
+                    const url = `https://service.iris.edu/irisws/timeseries/1/query?net=${net}&sta=${sta}&loc=${loc}&cha=${channelCode}&start=${start}&end=${end}&output=miniseed`;
+                    const response = await fetch(url);
+                    if (!response.ok) throw new Error(`HTTP Error: ${response.status} (${channelCode})`);
+                    const buffer = await response.arrayBuffer();
+                    if (buffer.byteLength < 100) throw new Error(`IRIS 回傳資料太短，可能是「No data found」字串。(${channelCode})`);
+
+                    const dataRecords = sp.miniseed.parseDataRecords(buffer);
+                    const seismograms = sp.miniseed.seismogramPerChannel(dataRecords);
+                    return seismograms.map(seis => sp.seismogram.SeismogramDisplayData.fromSeismogram(seis));
+                }));
+
+                const sdds = results.flat().sort((a, b) => a.codes().localeCompare(b.codes()));
+
+                if (!sdds || sdds.length === 0) throw new Error("解析結果為空 (0 SDD)。");
+
+                area.innerHTML = '';
+                sdds.forEach(sdd => {
+                    const con = document.createElement('div');
+                    con.className = 'axis-container';
+                    con.innerHTML = `<div class="axis-label">${sdd.codes()}</div><div class="seisplot-div"></div>`;
+                    area.appendChild(con);
+                    
+                    const graphConfig = new sp.seismographconfig.SeismographConfig();
+                    const plot = new sp.seismograph.Seismograph([sdd], graphConfig);
+                    const plotHost = con.querySelector('.seisplot-div');
+                    plotHost.appendChild(plot);
+                    plot.redraw();
+                });
+            } catch (e) {
+                area.innerHTML = `<div class="err-box"><b>解析失敗詳細資訊：</b>\n${e.message}\n\n<b>Stack Trace:</b>\n${e.stack}</div>`;
+            }
         }
-
-        const img = document.getElementById('waveform-img');
-        const hint = document.getElementById('hint');
-
-        hint.innerText = `正在請求波形 (${net}.${sta})...`;
-        img.style.display = 'none';
-
-        const url = `https://service.iris.edu/irisws/timeseries/1/query?net=${net}&sta=${sta}&loc=${loc}&cha=${cha}&start=${start}&end=${end}&output=plot`;
-
-        img.src = url;
-        img.onload = () => {
-            hint.style.display = 'none';
-            img.style.display = 'block';
-        };
-        img.onerror = () => {
-            hint.style.display = 'block';
-            hint.innerText = '查詢失敗：無資料或參數錯誤。';
-        };
     }
-</script>
 
+    document.getElementById('query-btn').onclick = doQuery;
+    loadStations();
+</script>
 </body>
 </html>
