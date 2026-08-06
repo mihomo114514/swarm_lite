@@ -77,8 +77,15 @@
         <div id="filter-inputs"></div>
         <button type="button" id="filter-apply">Apply</button>
     </div>
-    <div class="group"><label>開始 (UTC)</label><input type="datetime-local" id="start" step="1"></div>
-    <div class="group"><label>結束 (UTC)</label><input type="datetime-local" id="end" step="1"></div>
+    <div class="group"><label>開始 (UTC+8)</label><input type="datetime-local" id="start" step="1"></div>
+    <div class="group">
+        <label>開始 + n 分鐘</label>
+        <div style="display:flex; gap:8px; align-items:center;">
+            <input type="number" id="duration-minutes" value="5" min="1" step="1" style="flex:1;">
+            <button type="button" id="set-end-btn" style="padding:8px 10px; white-space:nowrap;">套用</button>
+        </div>
+    </div>
+    <div class="group"><label>結束 (UTC+8)</label><input type="datetime-local" id="end" step="1"></div>
     <button id="query-btn">執行查詢</button>
 </aside>
 
@@ -150,11 +157,37 @@
         refreshStationTimer = setTimeout(refreshStationLayer, 80);
     });
 
-    // 初始化時間
-    const format = (d) => d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0')+'T'+String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0')+':'+String(d.getUTCSeconds()).padStart(2,'0');
+    // 初始化時間：畫面顯示 UTC+8，送出時再轉 UTC
+    const displayOffsetMinutes = 8 * 60;
+    const formatDateTime = (date, offsetMinutes = 0) => {
+        const shifted = new Date(date.getTime() + offsetMinutes * 60000);
+        return shifted.getUTCFullYear() + '-' + String(shifted.getUTCMonth() + 1).padStart(2, '0') + '-' + String(shifted.getUTCDate()).padStart(2, '0') + 'T' + String(shifted.getUTCHours()).padStart(2, '0') + ':' + String(shifted.getUTCMinutes()).padStart(2, '0') + ':' + String(shifted.getUTCSeconds()).padStart(2, '0');
+    };
+    const parseDateTimeAsUtc = (value, offsetMinutes = 0) => {
+        const [datePart, timePart] = value.split('T');
+        const [year, month, day] = datePart.split('-').map(Number);
+        const [hour, minute, second = '0'] = timePart.split(':');
+        const utcMillis = Date.UTC(year, month - 1, day, Number(hour), Number(minute), Number(second)) - offsetMinutes * 60000;
+        return new Date(utcMillis);
+    };
+    const toIsoUtc = (value, offsetMinutes = 0) => formatDateTime(parseDateTimeAsUtc(value, offsetMinutes), 0);
+    const setEndFromStart = () => {
+        const startValue = document.getElementById('start').value;
+        const durationMinutes = Number.parseInt(document.getElementById('duration-minutes').value, 10);
+        if (!startValue) {
+            throw new Error('請先輸入開始時間。');
+        }
+        if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+            throw new Error('n 必須是大於 0 的整數。');
+        }
+
+        const startUtc = parseDateTimeAsUtc(startValue, displayOffsetMinutes);
+        const endUtc = new Date(startUtc.getTime() + durationMinutes * 60000);
+        document.getElementById('end').value = formatDateTime(endUtc, displayOffsetMinutes);
+    };
     const now = new Date();
-    document.getElementById('end').value = format(new Date(now.getTime() - 5*60000));
-    document.getElementById('start').value = format(new Date(now.getTime() - 15*60000));
+    document.getElementById('end').value = formatDateTime(new Date(now.getTime() - 5 * 60000), displayOffsetMinutes);
+    document.getElementById('start').value = formatDateTime(new Date(now.getTime() - 15 * 60000), displayOffsetMinutes);
 
     // 頻道 UI 初始化與連動
     const updateChaUI = () => {
@@ -172,15 +205,9 @@
             </select>`;
     };
     const updateFilterUI = () => {
-        const mode = document.querySelector('input[name="vm"]:checked').value;
         const panel = document.getElementById('filter-panel');
         const type = document.getElementById('filter-type').value;
         const inputs = document.getElementById('filter-inputs');
-
-        if (mode !== 'mseed') {
-            panel.style.display = 'none';
-            return;
-        }
 
         panel.style.display = 'flex';
         if (type === 'highpass' || type === 'lowpass') {
@@ -238,6 +265,27 @@
         }
 
         throw new Error(`未知的濾波模式：${filterType}`);
+    };
+
+    const buildPlotFilterSuffix = () => {
+        const spec = getFilterSpec();
+        if (!spec) {
+            return '';
+        }
+
+        if (spec.type === 'highpass') {
+            return `&hpfilter=${spec.cutoff}`;
+        }
+
+        if (spec.type === 'lowpass') {
+            return `&lpfilter=${spec.cutoff}`;
+        }
+
+        if (spec.type === 'bandpass') {
+            return `&bpfilter=${spec.low}-${spec.high}`;
+        }
+
+        return '';
     };
 
     const applySelectedFilter = (seis) => {
@@ -326,8 +374,8 @@
         const sta = document.getElementById('sta-select').value;
         const loc = document.getElementById('loc').value.trim();
         const cha = document.getElementById('cha').value.trim();
-        const start = document.getElementById('start').value;
-        const end = document.getElementById('end').value;
+        const start = toIsoUtc(document.getElementById('start').value, displayOffsetMinutes);
+        const end = toIsoUtc(document.getElementById('end').value, displayOffsetMinutes);
 
         const area = document.getElementById('display-area');
         area.innerHTML = '<p style="text-align:center;">請求中...</p>';
@@ -335,31 +383,50 @@
         if (mode === 'plot') {
             area.innerHTML = '';
             const chs = expandChaList(cha);
+            const filterSuffix = buildPlotFilterSuffix();
             chs.forEach(c => {
-                const url = `https://service.iris.edu/irisws/timeseries/1/query?net=${net}&sta=${sta}&loc=${loc}&cha=${c}&start=${start}&end=${end}&output=plot`;
+                const url = `https://service.iris.edu/irisws/timeseries/1/query?net=${net}&sta=${sta}&loc=${loc}&cha=${c}&start=${start}&end=${end}${filterSuffix}&output=plot`;
                 const con = document.createElement('div');
                 con.className = 'axis-container';
-                con.innerHTML = `<div class="axis-label">${net}.${sta}.${loc}.${c}</div><img src="${url}" style="width:100%" onerror="this.parentElement.style.display='none'">`;
+                con.innerHTML = `<div class="axis-label">${net}.${sta}.${loc}.${c}</div><img src="${url}" style="width:100%" onerror="this.style.display='none'; this.nextElementSibling.style.display='block'"><div class="err-box" style="display:none; margin-top:8px;">本測站無 ${c} 頻道</div>`;
                 area.appendChild(con);
             });
         } else {
             try {
                 const chaList = expandChaList(cha);
-                const results = await Promise.all(chaList.map(async (channelCode) => {
+                const results = await Promise.allSettled(chaList.map(async (channelCode) => {
                     const url = `https://service.iris.edu/irisws/timeseries/1/query?net=${net}&sta=${sta}&loc=${loc}&cha=${channelCode}&start=${start}&end=${end}&output=miniseed`;
                     const response = await fetch(url);
-                    if (!response.ok) throw new Error(`HTTP Error: ${response.status} (${channelCode})`);
+                    if (!response.ok) throw new Error(`本測站無 ${channelCode} 頻道`);
                     const buffer = await response.arrayBuffer();
-                    if (buffer.byteLength < 100) throw new Error(`IRIS 回傳資料太短，可能是「No data found」字串。(${channelCode})`);
+                    if (buffer.byteLength < 100) throw new Error(`本測站無 ${channelCode} 頻道`);
 
                     const dataRecords = sp.miniseed.parseDataRecords(buffer);
                     const seismograms = sp.miniseed.seismogramPerChannel(dataRecords);
-                    return seismograms.map(seis => sp.seismogram.SeismogramDisplayData.fromSeismogram(seis));
+                    if (!seismograms || seismograms.length === 0) {
+                        throw new Error(`本測站無 ${channelCode} 頻道`);
+                    }
+                    return {
+                        channelCode,
+                        sdds: seismograms.map(seis => sp.seismogram.SeismogramDisplayData.fromSeismogram(seis))
+                    };
                 }));
 
-                const sdds = results.flat().sort((a, b) => a.codes().localeCompare(b.codes()));
+                const sdds = [];
+                const missingChannels = [];
+                results.forEach(result => {
+                    if (result.status === 'fulfilled') {
+                        sdds.push(...result.value.sdds);
+                    } else if (result.reason?.message) {
+                        missingChannels.push(result.reason.message);
+                    }
+                });
 
-                if (!sdds || sdds.length === 0) throw new Error("解析結果為空 (0 SDD)。");
+                sdds.sort((a, b) => a.codes().localeCompare(b.codes()));
+
+                if (!sdds || sdds.length === 0) {
+                    throw new Error(missingChannels.length > 0 ? missingChannels.join('\n') : '解析結果為空 (0 SDD)。');
+                }
 
                 area.innerHTML = '';
                 const filteredSdds = sdds.map(sdd => {
@@ -376,11 +443,20 @@
                     area.appendChild(con);
                     
                     const graphConfig = new sp.seismographconfig.SeismographConfig();
+                    graphConfig.lineColors = ['#0000FF'];
                     const plot = new sp.seismograph.Seismograph([sdd], graphConfig);
                     const plotHost = con.querySelector('.seisplot-div');
                     plotHost.appendChild(plot);
                     plot.redraw();
                 });
+
+                if (missingChannels.length > 0) {
+                    const note = document.createElement('div');
+                    note.className = 'err-box';
+                    note.style.marginTop = '12px';
+                    note.textContent = missingChannels.join('\n');
+                    area.appendChild(note);
+                }
             } catch (e) {
                 area.innerHTML = `<div class="err-box"><b>解析失敗詳細資訊：</b>\n${e.message}\n\n<b>Stack Trace:</b>\n${e.stack}</div>`;
             }
@@ -389,6 +465,13 @@
 
     document.getElementById('query-btn').onclick = doQuery;
     document.getElementById('filter-apply').onclick = doQuery;
+    document.getElementById('set-end-btn').onclick = () => {
+        try {
+            setEndFromStart();
+        } catch (e) {
+            alert(e.message);
+        }
+    };
     loadStations();
 </script>
 </body>
