@@ -9,12 +9,14 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
     <style>
+        * { box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             margin: 0;
             display: flex;
             height: 100vh;
             background-color: #f4f4f9;
+            color: #333;
         }
 
         /* 左側選單 */
@@ -27,9 +29,10 @@
             flex-direction: column;
             gap: 15px;
             z-index: 1000;
+            overflow-y: auto;
         }
 
-        h2 { margin: 0 0 10px 0; font-size: 1.2rem; color: #333; }
+        h2 { margin: 0 0 10px 0; font-size: 1.2rem; color: #000; border-bottom: 2px solid #007bff; padding-bottom: 5px; }
 
         .input-group { display: flex; flex-direction: column; gap: 5px; }
         label { font-size: 0.85rem; color: #666; font-weight: bold; }
@@ -37,8 +40,9 @@
             padding: 8px;
             border: 1px solid #ddd;
             border-radius: 4px;
-            font-size: 1rem;
+            font-size: 0.95rem;
         }
+        input:focus { border-color: #007bff; outline: none; }
 
         button {
             background: #007bff;
@@ -48,9 +52,10 @@
             border-radius: 4px;
             cursor: pointer;
             font-size: 1rem;
+            font-weight: bold;
             margin-top: 10px;
+            transition: background 0.2s;
         }
-
         button:hover { background: #0056b3; }
 
         /* 右側內容 */
@@ -61,26 +66,28 @@
             overflow: hidden;
         }
 
-        #map { height: 40%; width: 100%; border-bottom: 2px solid #ddd; }
+        #map { height: 45%; width: 100%; border-bottom: 2px solid #ccc; }
 
         #waveform-container {
-            height: 60%;
+            height: 55%;
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
-            background: #fafafa;
+            background: #fff;
             overflow: auto;
-            padding: 20px;
+            padding: 10px;
         }
 
         #waveform-img {
             max-width: 100%;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-            background: white;
+            max-height: 90%;
+            box-shadow: 0 0 8px rgba(0,0,0,0.15);
             display: none; /* 初始隱藏 */
         }
 
-        .status-msg { color: #666; font-style: italic; }
+        .status-msg { color: #888; font-style: italic; font-size: 0.9rem; }
+        #info { font-size: 0.8rem; color: #888; margin-top: auto; padding-top: 10px; line-height: 1.4; }
     </style>
 </head>
 <body>
@@ -119,13 +126,17 @@
     </div>
 
     <button onclick="queryWaveform()">送出查詢 (Query)</button>
-    <div id="info" style="font-size: 0.8rem; color: #888; margin-top: 10px;"></div>
+    
+    <div id="info">
+        狀態：<span id="status-text">初始化中...</span><br>
+        <small id="url-debug"></small>
+    </div>
 </aside>
 
 <main id="main-content">
     <div id="map"></div>
     <div id="waveform-container">
-        <p id="placeholder" class="status-msg">請選擇台站並點擊 Query 顯示波形</p>
+        <p id="placeholder" class="status-msg">請由地圖選擇台站，或直接輸入代碼後按 Query</p>
         <img id="waveform-img" src="" alt="Waveform Plot">
     </div>
 </main>
@@ -135,78 +146,93 @@
 
 <script>
     // --- 1. 初始化地圖 ---
+    // 預設視角設在台灣附近
     const map = L.map('map').setView([23.5, 121], 7);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors'
+        attribution: '© OpenStreetMap'
     }).addTo(map);
 
-    // --- 2. 設定預設時間 (最近1小時) ---
+    // --- 2. 設定預設查詢時間 (最近1小時) ---
     function setDefaultTime() {
         const now = new Date();
         const oneHourAgo = new Date(now.getTime() - (60 * 60 * 1000));
         
-        document.getElementById('start').value = oneHourAgo.toISOString().slice(0, 16);
-        document.getElementById('end').value = now.toISOString().slice(0, 16);
+        // datetime-local 需要 YYYY-MM-DDTHH:MM 格式
+        const toLocalISO = (date) => {
+            const tzOffset = date.getTimezoneOffset() * 60000;
+            return (new Date(date - tzOffset)).toISOString().slice(0, 16);
+        };
+
+        document.getElementById('start').value = toLocalISO(oneHourAgo);
+        document.getElementById('end').value = toLocalISO(now);
     }
     setDefaultTime();
 
-    // --- 3. 讀取台站列表 ---
-    const STATIONS_URL = 'https://www.iris.edu/app/station_monitor/offline/stations.txt';
-
+    // --- 3. 讀取台站列表 (解決 CORS 問題) ---
     async function loadStations() {
+        const statusText = document.getElementById('status-text');
+        const targetUrl = 'https://www.iris.edu/app/station_monitor/offline/stations.txt';
+        // 使用 AllOrigins 代理
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+
         try {
-            const response = await fetch(STATIONS_URL);
+            statusText.innerText = '正在下載台站列表...';
+            const response = await fetch(proxyUrl);
+            if (!response.ok) throw new Error('連線失敗');
+            
             const data = await response.text();
             const lines = data.split('\n');
 
-            // 跳過標題列
+            let count = 0;
             for (let i = 1; i < lines.length; i++) {
                 const cols = lines[i].split('|');
                 if (cols.length < 4) continue;
 
                 const [net, sta, lat, lon, elev, site] = cols;
 
-                // 在地圖建立 Marker
                 const marker = L.marker([parseFloat(lat), parseFloat(lon)])
                     .addTo(map)
                     .bindPopup(`<b>${net}.${sta}</b><br>${site}`);
 
-                // 點擊 Marker 自動填入表單
+                // 點擊 Marker 自動填入
                 marker.on('click', () => {
                     document.getElementById('net').value = net;
                     document.getElementById('sta').value = sta;
                 });
+                count++;
             }
+            statusText.innerText = `載入完成 (${count} 個台站)`;
         } catch (error) {
-            console.error('無法載入台站列表:', error);
-            document.getElementById('info').innerText = '無法從 IRIS 載入台站列表。';
+            console.error(error);
+            statusText.innerText = '台站載入失敗 (請檢查網路)';
         }
     }
     loadStations();
 
-    // --- 4. 查詢波形圖片 ---
+    // --- 4. 執行波形查詢 ---
     function queryWaveform() {
         const net = document.getElementById('net').value.trim();
         const sta = document.getElementById('sta').value.trim();
         const loc = document.getElementById('loc').value.trim();
         const cha = document.getElementById('cha').value.trim();
-        
-        // 格式化時間：IRIS API 接受 ISO 格式或 YYYY-MM-DDTHH:MM:SS
         const start = document.getElementById('start').value;
         const end = document.getElementById('end').value;
 
         if (!net || !sta) {
-            alert('請輸入 Network 與 Station');
+            alert('請輸入 Network 與 Station 代碼');
             return;
         }
 
         const placeholder = document.getElementById('placeholder');
         const img = document.getElementById('waveform-img');
+        const urlDebug = document.getElementById('url-debug');
 
-        placeholder.innerText = '載入中...';
+        // 顯示載入中狀態
+        placeholder.style.display = 'block';
+        placeholder.innerText = '正在請求 IRIS 繪製波形...';
         img.style.display = 'none';
 
-        // 組合 URL
+        // 組合 IRIS Timeseries API 網址
         const baseUrl = 'https://service.iris.edu/irisws/timeseries/1/query';
         const params = new URLSearchParams({
             net: net,
@@ -219,23 +245,23 @@
         });
 
         const finalUrl = `${baseUrl}?${params.toString()}`;
-
-        // 更新圖片
+        
+        // 更新圖片 URL
         img.src = finalUrl;
+        urlDebug.innerHTML = `<a href="${finalUrl}" target="_blank">點此另開圖片連結</a>`;
 
+        // 圖片載入成功
         img.onload = function() {
             placeholder.style.display = 'none';
             img.style.display = 'block';
         };
 
+        // 圖片載入失敗 (403, 404 或無資料)
         img.onerror = function() {
             placeholder.style.display = 'block';
-            placeholder.innerText = '查詢失敗，請檢查台站代碼或該時段是否有資料。';
+            placeholder.innerText = '查詢失敗：該時段可能無資料，或參數輸入有誤。';
             img.style.display = 'none';
         };
-
-        // 顯示目前查詢網址方便除錯
-        document.getElementById('info').innerHTML = `Source: <a href="${finalUrl}" target="_blank">IRIS Link</a>`;
     }
 </script>
 
