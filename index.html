@@ -49,8 +49,8 @@
 <aside id="sidebar">
     <h2>Swarm lite</h2>
     <div class="mode-switch">
-        <label><input type="radio" name="vm" value="plot" checked> <span>圖片 (PNG)</span></label>
-        <label><input type="radio" name="vm" value="mseed"> <span>解析 (mseed)</span></label>
+        <label><input type="radio" name="vm" value="mseed" checked> <span>解析 (mseed)</span></label>
+        <label><input type="radio" name="vm" value="plot"> <span>圖片 (PNG)</span></label>
     </div>
     <div class="group">
         <label>台網過濾</label>
@@ -79,10 +79,13 @@
     </div>
     <div class="group"><label>開始 (UTC+8)</label><input type="datetime-local" id="start" step="1"></div>
     <div class="group">
-        <label>開始 + n 分鐘</label>
-        <div style="display:flex; gap:8px; align-items:center;">
-            <input type="number" id="duration-minutes" value="10" min="1" step="1" style="flex:1;">
-            <button type="button" id="set-end-btn" style="padding:8px 10px; white-space:nowrap;">套用</button>
+        <label>相對時間</label>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <input type="number" id="start-duration-minutes" value="10" min="1" step="1" style="flex:1; min-width:90px;">
+            <input type="number" id="end-duration-minutes" value="5" min="1" step="1" style="flex:1; min-width:90px;">
+            <button type="button" id="set-end-btn" style="padding:8px 10px; white-space:nowrap;">開始 + n 分鐘</button>
+            <button type="button" id="set-start-btn" style="padding:8px 10px; white-space:nowrap;">結束 - n 分鐘</button>
+            <button type="button" id="set-now-btn" style="padding:8px 10px; white-space:nowrap;">回到當前</button>
         </div>
     </div>
     <div class="group"><label>結束 (UTC+8)</label><input type="datetime-local" id="end" step="1"></div>
@@ -99,8 +102,13 @@
 <script type="module">
     import * as sp from './seisplotjs_3.2.6_standalone.mjs';
 
-    const map = L.map('map').setView([23.5, 121], 7);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    const map = L.map('map', {
+        worldCopyJump: true,
+        continuousWorld: true
+    }).setView([23.5, 121], 7);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        noWrap: false
+    }).addTo(map);
     const stationLayer = L.layerGroup().addTo(map);
 
     let stationMaster = {};
@@ -173,7 +181,7 @@
     const toIsoUtc = (value, offsetMinutes = 0) => formatDateTime(parseDateTimeAsUtc(value, offsetMinutes), 0);
     const setEndFromStart = () => {
         const startValue = document.getElementById('start').value;
-        const durationMinutes = Number.parseInt(document.getElementById('duration-minutes').value, 10);
+        const durationMinutes = Number.parseInt(document.getElementById('start-duration-minutes').value, 10);
         if (!startValue) {
             throw new Error('請先輸入開始時間。');
         }
@@ -185,9 +193,26 @@
         const endUtc = new Date(startUtc.getTime() + durationMinutes * 60000);
         document.getElementById('end').value = formatDateTime(endUtc, displayOffsetMinutes);
     };
-    const now = new Date();
-    document.getElementById('end').value = formatDateTime(new Date(now.getTime() - 0 * 60000), displayOffsetMinutes);
-    document.getElementById('start').value = formatDateTime(new Date(now.getTime() - 10 * 60000), displayOffsetMinutes);
+    const setStartFromEnd = () => {
+        const endValue = document.getElementById('end').value;
+        const durationMinutes = Number.parseInt(document.getElementById('end-duration-minutes').value, 10);
+        if (!endValue) {
+            throw new Error('請先輸入結束時間。');
+        }
+        if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+            throw new Error('n 必須是大於 0 的整數。');
+        }
+
+        const endUtc = parseDateTimeAsUtc(endValue, displayOffsetMinutes);
+        const startUtc = new Date(endUtc.getTime() - durationMinutes * 60000);
+        document.getElementById('start').value = formatDateTime(startUtc, displayOffsetMinutes);
+    };
+    const setCurrentTime = () => {
+        const now = new Date();
+        document.getElementById('end').value = formatDateTime(now, displayOffsetMinutes);
+        document.getElementById('start').value = formatDateTime(new Date(now.getTime() - 10 * 60000), displayOffsetMinutes);
+    };
+    setCurrentTime();
 
     // 頻道 UI 初始化與連動
     const updateChaUI = () => {
@@ -319,7 +344,7 @@
 
     const expandChaList = (cha) => {
         if (!cha || cha === 'All') {
-            return ['BHZ', 'BHN', 'BHE'];
+            return ['BHZ', 'BHN', 'BHE', 'HHZ', 'HHN', 'HHE', 'EHZ', 'EHN', 'EHE', 'HNZ', 'HNN', 'HNE', 'SHZ', 'SHN', 'SHE'];
         }
         if (cha.endsWith('?')) {
             return ['Z', 'N', 'E'].map(x => cha.replace('?', x));
@@ -474,6 +499,16 @@
         } catch (e) {
             alert(e.message);
         }
+    };
+    document.getElementById('set-start-btn').onclick = () => {
+        try {
+            setStartFromEnd();
+        } catch (e) {
+            alert(e.message);
+        }
+    };
+    document.getElementById('set-now-btn').onclick = () => {
+        setCurrentTime();
     };
     loadStations();
 </script>
