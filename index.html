@@ -186,7 +186,7 @@
         document.getElementById('end').value = formatDateTime(endUtc, displayOffsetMinutes);
     };
     const now = new Date();
-    document.getElementById('end').value = formatDateTime(new Date(now.getTime() - 5 * 60000), displayOffsetMinutes);
+    document.getElementById('end').value = formatDateTime(new Date(now.getTime() * 60000), displayOffsetMinutes);
     document.getElementById('start').value = formatDateTime(new Date(now.getTime() - 15 * 60000), displayOffsetMinutes);
 
     // 頻道 UI 初始化與連動
