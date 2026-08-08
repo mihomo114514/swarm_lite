@@ -4,8 +4,79 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>swarm_lite</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 20px; }
+      .waveform-list { display: grid; gap: 12px; max-width: 900px; }
+      .waveform-card { position: relative; border: 1px solid #ddd; border-radius: 8px; padding: 12px; background: #fff; }
+      .waveform-canvas { height: 80px; border-radius: 6px; background: linear-gradient(180deg, #f5f8ff, #edf2ff); }
+      .filter-label { position: absolute; top: 10px; right: 10px; font-size: 12px; color: #1b4dd8; background: rgba(255,255,255,.9); border: 1px solid #c8d6ff; border-radius: 4px; padding: 2px 6px; }
+      .hidden { display: none; }
+    </style>
   </head>
   <body>
-    <h1>佔位頁面</h1>
+    <h1>MSEED 模式波形圖（佔位）</h1>
+
+    <section id="mseedWaveforms" class="waveform-list" data-mode="mseed">
+      <article class="waveform-card" data-has-data="true" data-filter-enabled="true" data-filter-type="band-pass" data-f1="0.5" data-f2="10">
+        <div class="filter-label"></div>
+        <div class="waveform-canvas"></div>
+      </article>
+
+      <article class="waveform-card" data-has-data="true" data-filter-enabled="true" data-filter-type="high-pass" data-f1="2">
+        <div class="filter-label"></div>
+        <div class="waveform-canvas"></div>
+      </article>
+
+      <article class="waveform-card" data-has-data="false" data-filter-enabled="true" data-filter-type="low-pass" data-f1="8">
+        <div class="filter-label"></div>
+        <div class="waveform-canvas"></div>
+      </article>
+    </section>
+
+    <script>
+      const formatHz = (value) => `${Number(value)}hz`;
+
+      const toFilterText = (card) => {
+        const type = card.dataset.filterType;
+        const f1 = card.dataset.f1;
+        const f2 = card.dataset.f2;
+
+        if (type === 'band-pass' && f1 && f2) {
+          return `Band-pass ${formatHz(f1)}-${formatHz(f2)}`;
+        }
+        if (type === 'high-pass' && f1) {
+          return `High-pass ${formatHz(f1)}`;
+        }
+        if (type === 'low-pass' && f1) {
+          return `Low-pass ${formatHz(f1)}`;
+        }
+        return '';
+      };
+
+      const section = document.getElementById('mseedWaveforms');
+      const isMseedMode = section?.dataset.mode === 'mseed';
+
+      if (isMseedMode) {
+        section.querySelectorAll('.waveform-card').forEach((card) => {
+          const hasData = card.dataset.hasData === 'true';
+          const filterEnabled = card.dataset.filterEnabled === 'true';
+          const label = card.querySelector('.filter-label');
+
+          if (!hasData || !filterEnabled) {
+            label.classList.add('hidden');
+            return;
+          }
+
+          const text = toFilterText(card);
+          if (!text) {
+            label.classList.add('hidden');
+            return;
+          }
+
+          label.textContent = text;
+          label.classList.remove('hidden');
+        });
+      }
+    </script>
   </body>
 </html>
