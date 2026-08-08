@@ -25,7 +25,21 @@
         #viewer { flex-grow: 1; background: #f4f4f4; padding: 20px; overflow-y: auto; }
         .axis-container { max-width: 850px; margin: 0 auto 15px auto; background: #fff; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
         .axis-label { font-size: 0.8rem; font-weight: bold; color: #333; background: #f9f9f9; padding: 4px 12px; border-bottom: 1px solid #eee; }
-        .seisplot-div { height: 250px; width: 100%; }
+        .seisplot-div { height: 250px; width: 100%; position: relative; }
+        .filter-badge {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid #ddd;
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: #333;
+            z-index: 5;
+            pointer-events: none;
+        }
         .err-box { max-width: 850px; margin: 0 auto; color: red; background: #fff; padding: 15px; border: 2px solid red; font-family: monospace; font-size: 0.8rem; white-space: pre-wrap; }
         #filter-panel { display: flex; flex-direction: column; gap: 6px; }
         #filter-inputs { display: flex; flex-direction: column; gap: 8px; }
@@ -341,6 +355,21 @@
 
         return seis;
     };
+    const formatFilterLabel = (spec) => {
+        if (!spec) {
+            return '';
+        }
+        if (spec.type === 'highpass') {
+            return `High-pass ${spec.cutoff}hz`;
+        }
+        if (spec.type === 'lowpass') {
+            return `Low-pass ${spec.cutoff}hz`;
+        }
+        if (spec.type === 'bandpass') {
+            return `Band-pass ${spec.low}hz-${spec.high}hz`;
+        }
+        return '';
+    };
 
     const expandChaList = (cha) => {
         if (!cha || cha === 'All') {
@@ -457,6 +486,7 @@
                 }
 
                 area.innerHTML = '';
+                const filterLabel = formatFilterLabel(getFilterSpec());
                 const filteredSdds = sdds.map(sdd => {
                     if (!sdd.seismogram) {
                         return sdd;
@@ -475,6 +505,12 @@
                     const plot = new sp.seismograph.Seismograph([sdd], graphConfig);
                     const plotHost = con.querySelector('.seisplot-div');
                     plotHost.appendChild(plot);
+                    if (filterLabel) {
+                        const badge = document.createElement('div');
+                        badge.className = 'filter-badge';
+                        badge.textContent = filterLabel;
+                        plotHost.appendChild(badge);
+                    }
                     plot.redraw();
                 });
 
