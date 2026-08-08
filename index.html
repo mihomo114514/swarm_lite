@@ -24,7 +24,8 @@
         #map { height: 35%; width: 100%; border-bottom: 1px solid #ccc; }
         #viewer { flex-grow: 1; background: #f4f4f4; padding: 20px; overflow-y: auto; }
         .axis-container { max-width: 850px; margin: 0 auto 15px auto; background: #fff; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        .axis-label { font-size: 0.8rem; font-weight: bold; color: #333; background: #f9f9f9; padding: 4px 12px; border-bottom: 1px solid #eee; }
+        .axis-label { font-size: 0.8rem; font-weight: bold; color: #333; background: #f9f9f9; padding: 4px 12px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+        .axis-filter-label { font-size: 0.75rem; font-weight: normal; color: #666; white-space: nowrap; }
         .seisplot-div { height: 250px; width: 100%; }
         .err-box { max-width: 850px; margin: 0 auto; color: red; background: #fff; padding: 15px; border: 2px solid red; font-family: monospace; font-size: 0.8rem; white-space: pre-wrap; }
         #filter-panel { display: flex; flex-direction: column; gap: 6px; }
@@ -342,6 +343,14 @@
         return seis;
     };
 
+    const formatFilterSpecLabel = (spec) => {
+        if (!spec) return '';
+        if (spec.type === 'highpass') return `High-pass ${spec.cutoff}hz`;
+        if (spec.type === 'lowpass') return `Low-pass ${spec.cutoff}hz`;
+        if (spec.type === 'bandpass') return `Band-pass ${spec.low}hz-${spec.high}hz`;
+        return '';
+    };
+
     const expandChaList = (cha) => {
         if (!cha || cha === 'All') {
             return ['BHZ', 'BHN', 'BHE', 'HHZ', 'HHN', 'HHE', 'EHZ', 'EHN', 'EHE', 'HNZ', 'HNN', 'HNE', 'SHZ', 'SHN', 'SHE'];
@@ -457,6 +466,9 @@
                 }
 
                 area.innerHTML = '';
+                const activeFilterSpec = getFilterSpec();
+                const activeFilterLabel = formatFilterSpecLabel(activeFilterSpec);
+
                 const filteredSdds = sdds.map(sdd => {
                     if (!sdd.seismogram) {
                         return sdd;
@@ -467,7 +479,7 @@
                 filteredSdds.forEach(sdd => {
                     const con = document.createElement('div');
                     con.className = 'axis-container';
-                    con.innerHTML = `<div class="axis-label">${sdd.codes()}</div><div class="seisplot-div"></div>`;
+                    con.innerHTML = `<div class="axis-label"><span>${sdd.codes()}</span>${activeFilterLabel ? `<span class="axis-filter-label">${activeFilterLabel}</span>` : ''}</div><div class="seisplot-div"></div>`;
                     area.appendChild(con);
                     
                     const graphConfig = new sp.seismographconfig.SeismographConfig();
