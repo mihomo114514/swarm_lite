@@ -25,7 +25,20 @@
         #viewer { flex-grow: 1; background: #f4f4f4; padding: 20px; overflow-y: auto; }
         .axis-container { max-width: 850px; margin: 0 auto 15px auto; background: #fff; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
         .axis-label { font-size: 0.8rem; font-weight: bold; color: #333; background: #f9f9f9; padding: 4px 12px; border-bottom: 1px solid #eee; }
-        .seisplot-div { height: 250px; width: 100%; }
+        .seisplot-div { height: 250px; width: 100%; position: relative; }
+        .filter-overlay {
+            position: absolute;
+            top: 4px;
+            right: 8px;
+            z-index: 10;
+            font-size: 0.75rem;
+            font-weight: bold;
+            color: #666;
+            background: rgba(255, 255, 255, 0.85);
+            padding: 2px 6px;
+            border-radius: 3px;
+            pointer-events: none;
+        }
         .err-box { max-width: 850px; margin: 0 auto; color: red; background: #fff; padding: 15px; border: 2px solid red; font-family: monospace; font-size: 0.8rem; white-space: pre-wrap; }
         #filter-panel { display: flex; flex-direction: column; gap: 6px; }
         #filter-inputs { display: flex; flex-direction: column; gap: 8px; }
@@ -295,6 +308,23 @@
         throw new Error(`未知的濾波模式：${filterType}`);
     };
 
+    const buildFilterLabel = () => {
+        const spec = getFilterSpec();
+        if (!spec) {
+            return '';
+        }
+        if (spec.type === 'highpass') {
+            return `High-pass ${spec.cutoff}hz`;
+        }
+        if (spec.type === 'lowpass') {
+            return `Low-pass ${spec.cutoff}hz`;
+        }
+        if (spec.type === 'bandpass') {
+            return `Band-pass ${spec.low}hz-${spec.high}hz`;
+        }
+        return '';
+    };
+
     const buildPlotFilterSuffix = () => {
         const spec = getFilterSpec();
         if (!spec) {
@@ -464,10 +494,11 @@
                     return sdd.cloneWithNewSeismogram(applySelectedFilter(sdd.seismogram));
                 });
 
+                const filterLabel = buildFilterLabel();
                 filteredSdds.forEach(sdd => {
                     const con = document.createElement('div');
                     con.className = 'axis-container';
-                    con.innerHTML = `<div class="axis-label">${sdd.codes()}</div><div class="seisplot-div"></div>`;
+                    con.innerHTML = `<div class="axis-label">${sdd.codes()}</div><div class="seisplot-div">${filterLabel ? `<div class="filter-overlay">${filterLabel}</div>` : ''}</div>`;
                     area.appendChild(con);
                     
                     const graphConfig = new sp.seismographconfig.SeismographConfig();
